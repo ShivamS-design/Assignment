@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM-as-OS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: #2563eb; color: white; padding: 1rem; margin-bottom: 2rem; border-radius: 8px; }
+        .card { background: white; padding: 1.5rem; margin-bottom: 1rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn { background: #2563eb; color: white; padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; }
+        .btn:hover { background: #1d4ed8; }
+        .status { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.875rem; }
+        .status.running { background: #dcfce7; color: #166534; }
+        .status.stopped { background: #fef2f2; color: #dc2626; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+        .metric { text-align: center; }
+        .metric-value { font-size: 2rem; font-weight: bold; color: #2563eb; }
+        .metric-label { color: #6b7280; font-size: 0.875rem; }
+        .upload-area { border: 2px dashed #d1d5db; padding: 2rem; text-align: center; border-radius: 8px; cursor: pointer; }
+        .upload-area:hover { border-color: #2563eb; background: #f8fafc; }
+        .log { background: #1f2937; color: #f9fafb; padding: 1rem; border-radius: 4px; font-family: monospace; font-size: 0.875rem; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 WASM-as-OS Control Panel</h1>
+            <p>WebAssembly Execution Platform</p>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>System Status</h3>
+                <div style="margin: 1rem 0;">
+                    <div>API Server: <span class="status running">Running</span></div>
+                    <div>Database: <span class="status running">Connected</span></div>
+                    <div>Redis Cache: <span class="status running">Connected</span></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Quick Stats</h3>
+                <div class="grid" style="grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem;">
+                    <div class="metric">
+                        <div class="metric-value">0</div>
+                        <div class="metric-label">Modules</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">0</div>
+                        <div class="metric-label">Active Tasks</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Upload WASM Module</h3>
+            <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                <input type="file" id="fileInput" accept=".wasm" style="display: none;" onchange="handleFileUpload(event)">
+                <p>📁 Click to select WASM file or drag and drop</p>
+                <p style="color: #6b7280; font-size: 0.875rem;">Supported: .wasm files (max 10MB)</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>API Test</h3>
+            <div style="margin: 1rem 0;">
+                <button class="btn" onclick="testAPI()">Test API Connection</button>
+                <button class="btn" onclick="getModules()" style="margin-left: 0.5rem;">List Modules</button>
+            </div>
+            <div id="apiResult" class="log" style="margin-top: 1rem; display: none;"></div>
+        </div>
+
+        <div class="card">
+            <h3>System Logs</h3>
+            <div id="logs" class="log">
+                <div>[INFO] WASM-as-OS frontend loaded</div>
+                <div>[INFO] Connecting to API server...</div>
+                <div>[INFO] System ready</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8080';
+        let authToken = null;
+
+        // Auto-login with default credentials
+        async function autoLogin() {
+            try {
+                const response = await fetch(`${API_URL}/api/v1/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: 'admin', password: 'admin123' })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    authToken = data.token;
+                    addLog('[SUCCESS] Authenticated successfully');
+                } else {
+                    addLog('[ERROR] Authentication failed');
+                }
+            } catch (error) {
+                addLog(`[ERROR] Connection failed: ${error.message}`);
+            }
+        }
+
+        async function testAPI() {
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                const data = await response.text();
+                document.getElementById('apiResult').style.display = 'block';
+                document.getElementById('apiResult').innerHTML = `<div>[SUCCESS] API Response: ${data}</div>`;
+                addLog('[SUCCESS] API test completed');
+            } catch (error) {
+                document.getElementById('apiResult').style.display = 'block';
+                document.getElementById('apiResult').innerHTML = `<div>[ERROR] ${error.message}</div>`;
+                addLog(`[ERROR] API test failed: ${error.message}`);
+            }
+        }
+
+        async function getModules() {
+            try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+                
+                const response = await fetch(`${API_URL}/api/v1/modules`, { headers });
+                const data = await response.json();
+                
+                document.getElementById('apiResult').style.display = 'block';
+                document.getElementById('apiResult').innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                addLog(`[SUCCESS] Retrieved ${data.modules?.length || 0} modules`);
+            } catch (error) {
+                document.getElementById('apiResult').style.display = 'block';
+                document.getElementById('apiResult').innerHTML = `<div>[ERROR] ${error.message}</div>`;
+                addLog(`[ERROR] Failed to get modules: ${error.message}`);
+            }
+        }
+
+        async function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!file.name.endsWith('.wasm')) {
+                addLog('[ERROR] Please select a WASM file');
+                return;
+            }
+
+            if (file.size > 10 * 1024 * 1024) {
+                addLog('[ERROR] File too large (max 10MB)');
+                return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('module', file);
+
+                const headers = {};
+                if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+
+                const response = await fetch(`${API_URL}/api/v1/modules`, {
+                    method: 'POST',
+                    headers,
+                    body: file
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    addLog(`[SUCCESS] Module uploaded: ${data.module_id}`);
+                } else {
+                    const error = await response.text();
+                    addLog(`[ERROR] Upload failed: ${error}`);
+                }
+            } catch (error) {
+                addLog(`[ERROR] Upload error: ${error.message}`);
+            }
+        }
+
+        function addLog(message) {
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            logs.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        // Initialize
+        window.onload = () => {
+            autoLogin();
+            setInterval(() => {
+                // Update metrics periodically
+                testAPI();
+            }, 30000);
+        };
+    </script>
+</body>
+</html>
