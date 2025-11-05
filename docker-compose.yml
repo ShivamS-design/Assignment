@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: wasmdb
+      POSTGRES_USER: wasmuser
+      POSTGRES_PASSWORD: wasmpass123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wasmuser -d wasmdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass redispass123
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: golang:1.21-alpine
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./rust-engine:/rust-engine
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=wasmdb
+      - DB_USER=wasmuser
+      - DB_PASSWORD=wasmpass123
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redispass123
+      - JWT_SECRET=wasm-as-os-secret-key-2024
+      - PORT=8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        apk add --no-cache gcc musl-dev &&
+        go mod download &&
+        go run cmd/server/main.go
+      "
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:8080
+    command: >
+      sh -c "
+        if [ ! -d node_modules ]; then
+          npm install
+        fi &&
+        npm run dev -- --host 0.0.0.0
+      "
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
